@@ -1,8 +1,10 @@
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 import sc2reader
 from collections import Counter
+from liquipedia_format import generate_liquipedia_format
+
 
 class ReplayAnalyzerApp:
     def __init__(self, root):
@@ -158,22 +160,77 @@ class ReplayAnalyzerApp:
 
     def show_summary(self):
         self.clear_root()
-        text = tk.Text(self.root, width=100, height=20)
-        text.pack()
+        self.summary_box = tk.Text(self.root, width=100, height=20)
+        self.summary_box.pack()
+        self.refresh_summary_display()
+
+        btn_frame = tk.Frame(self.root)
+        btn_frame.pack(pady=10)
+
+        tk.Button(btn_frame, text="Enregistrer le fichier", command=self.save_summary).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="Liquipedia format", command=self.export_liquipedia_format).pack(side='left', padx=5)
+
+    def refresh_summary_display(self):
+        self.summary_box.config(state='normal')
+        self.summary_box.delete(1.0, tk.END)
         for line in self.summaries:
-            text.insert(tk.END, line + "\n")
+            self.summary_box.insert(tk.END, line + "\n")
+        self.summary_box.config(state='disabled')
 
-        tk.Button(self.root, text="Enregistrer le fichier", command=lambda: self.save_summary()).pack(pady=10)
-
-    def save_summary(self, score_line):
+    def save_summary(self):
         try:
             with open(os.path.join(self.folder, "replay_summary.txt"), 'w', encoding='utf-8') as f:
-                f.write(score_line + "\n")
                 for line in self.summaries:
                     f.write(line + "\n")
             messagebox.showinfo("Succès", "Résumé enregistré avec succès !")
         except Exception as e:
             messagebox.showerror("Erreur d'enregistrement", str(e))
+
+
+    def export_liquipedia_format(self):
+        matchsection = simpledialog.askstring("MatchSection", "Nom du matchsection (ex: Week 5):")
+        if not matchsection:
+            return
+
+        opponent1 = simpledialog.askstring("Opponent 1", f"Quel clan est Opponent 1 ? ({self.clan_a} ou {self.clan_b})")
+        if opponent1 not in [self.clan_a, self.clan_b]:
+            messagebox.showerror("Erreur", "Clan invalide pour Opponent 1.")
+            return
+
+
+        # Construire la structure attendue par generate_liquipedia_format
+        parsed_replays = []
+        for path in self.replay_paths:
+            try:
+                replay = sc2reader.load_replay(path, load_map=True)
+                map_name = replay.map_name
+                winner_team = replay.winner.number
+                teams = {}
+                for p in replay.players:
+                    teams.setdefault(p.team.number, []).append((p.name, p.pick_race))
+
+                sorted_teams = sorted(teams.items(), key=lambda kv: kv[0])
+                team1, team2 = [v for _, v in sorted_teams]
+
+                winner = 1 if sorted_teams[0][0] == winner_team else 2
+
+                parsed_replays.append((replay.start_time, map_name, team1, team2, winner))
+            except Exception as e:
+                messagebox.showerror("Erreur Liquipedia", str(e))
+                return
+
+        liqui_format = generate_liquipedia_format(
+            parsed_replays,
+            self.clan_a,
+            self.clan_b,
+            self.player_clan,
+            self.player_alias,
+            matchsection,
+            opponent1
+        )
+
+        self.summaries = liqui_format.splitlines()
+        self.refresh_summary_display()
 
     def get_replay_records(self, folder):
         records = []
